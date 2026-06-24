@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>😊 AI 감정 공감 친구</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <style>
+        /* --- UI 디자인 요구사항: 파스텔 톤 & 큰 글씨 (엔트리 스타일) --- */
+        :root {
+            --bg-color: #f0f8ff; /* 하늘색 계열 메인 바탕 */
+            --primary: #4a90e2;
+            --accent: #ffd43b; /* 노란색 포인트 */
+            --purple: #b39ddb; /* 연보라색 */
+            --text-color: #333;
+            --card-bg: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: 'NanumSquareRound', 'Malgun Gothic', sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: var(--card-bg);
+            border-radius: 24px;
+            padding: 30px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.05);
+            text-align: center;
+            position: relative;
+        }
+
+        h1 { font-size: 2.2rem; color: var(--primary); margin-bottom: 10px; }
+        h2 { font-size: 1.8rem; color: #444; }
+        p { font-size: 1.2rem; line-height: 1.6; color: #666; }
+        
+        /* 공통 버튼 스타일 (초등학생 타겟 - 크고 직관적) */
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 15px 32px;
+            font-size: 1.3rem;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(74,144,226,0.3);
+            transition: all 0.2s ease;
+            margin: 10px;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(74,144,226,0.4); }
+        button:active { transform: translateY(1px); }
+        button.secondary { background-color: var(--purple); box-shadow: 0 4px 10px rgba(179,157,219,0.3); }
+
+        /* 유틸리티 상단 바 (전체화면, 초기화 등) */
+        .utility-bar {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+        .util-btn { padding: 8px 16px; font-size: 0.9rem; background: #fff; color: #555; border: 1px solid #ddd; }
+
+        /* 화면(STEP) 전환 제어 */
+        .step { display: none; }
+        .step.active { display: block; animation: fadeIn 0.5s ease; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 이모지 및 카드 레이아웃 */
+        .emoji-badge { font-size: 3.5rem; margin: 10px; display: inline-block; }
+        .input-group {
+            background: #fdfdfd;
+            border: 3px solid #eee;
+            border-radius: 20px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .input-group.joy { border-color: #ffd43b; background: #fffdf3; }
+        .input-group.sad { border-color: #a5d8ff; background: #f1f9ff; }
+        .input-group.angry { border-color: #ffc9c9; background: #fff5f5; }
+        
+        textarea {
+            width: 100%; height: 80px; padding: 12px; font-size: 1.1rem;
+            border: 2px solid #ddd; border-radius: 12px; resize: none; margin-top: 10px;
+        }
+        .stt-btn { background-color: #51cf66; font-size: 1rem; padding: 8px 16px; }
+
+        /* 모델 입력창 */
+        .model-input { width: 80%; padding: 12px; font-size: 1.1rem; border: 2px solid var(--purple); border-radius: 12px; margin: 15px 0; }
+        .status-badge { display: inline-block; padding: 8px 16px; background: #e2e8f0; border-radius: 20px; font-weight: bold; margin-top: 10px; }
+        .status-badge.success { background: #d3f9d8; color: #2b8a3e; }
+
+        /* 실시간 화면 레이아웃 (STEP 3) */
+        .recognition-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 20px; }
+        .cam-box { position: relative; width: 320px; height: 240px; background: #000; border-radius: 16px; overflow: hidden; border: 4px solid var(--primary); }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        .result-box { flex: 1; min-width: 280px; text-align: left; background: #f8f9fa; padding: 20px; border-radius: 16px; }
+        .progress-bar { background: #e9ecef; border-radius: 10px; height: 20px; margin-bottom: 10px; overflow: hidden; }
+        .progress-fill { background: var(--primary); height: 100%; width: 0%; transition: width 0.1s ease; }
+        
+        /* 미확정/확정 안내 문구 & 대왕 말풍선 */
+        .output-display {
+            margin-top: 25px; padding: 20px; border-radius: 16px; background: #fff9db;
+            border: 2px dashed #fcc419; min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        
+        .big-emoji { font-size: 4rem; transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .big-emoji.bounce { transform: scale(1.4); }
+        
+        .speech-bubble {
+            position: relative; background: #ffffff; border: 3px solid var(--primary);
+            border-radius: 20px; padding: 15px 25px; margin-top: 15px; max-width: 90%;
+            font-size: 1.4rem; font-weight: bold; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        /* 챌린지 스티커 판 */
+        .challenge-board { display: flex; justify-content: center; gap: 15px; margin: 20px 0; }
+        .sticker { padding: 10px 20px; background: #e9ecef; border-radius: 50px; font-size: 1.1rem; color: #aaa; font-weight: bold; }
+        .sticker.complete { background: #ffec99; color: #f59f00; border: 2px solid #fcc419; }
+
+        /* 인증서 이동 버튼 특수 스타일 */
+        .cert-go-btn {
+            background-color: #ff6b6b;
+            box-shadow: 0 4px 15px rgba(255,107,107,0.4);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        /* 인증서 스타일 */
+        .certificate { border: 10px double var(--accent); padding: 40px 20px; background: #fffdf5; border-radius: 20px; }
+        .cert-title { font-size: 2.5rem; color: #e67e22; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="utility-bar">
+        <select id="cameraSelect" onchange="changeCamera()" class="util-btn" style="border-radius:10px;"><option>카메라 선택 중...</option></select>
+        <div>
+            <button class="util-btn" onclick="toggleFullScreen()">전체화면 🖥️</button>
+            <button class="util-btn" onclick="resetAllData()" style="color:red;">다시 시작 🔄</button>
+        </div>
+    </div>
+
+    <div class="container">
+
+        <div id="step0" class="step active">
+            <h1>😊 AI 감정 공감 친구</h1>
+            <p>AI는 사람의 표정을 보고 감정을 분석할 수 있습니다.<br>
+            이번 프로젝트에서는 친구의 감정을 이해하고 따뜻한 공감의 말을 전달하는 AI 프로그램을 체험합니다.</p>
+            <hr style="border: 1px solid #eee; margin:20px 0;">
+            <h3>👇 우리가 함께 배울 감정들이에요!</h3>
+            <div>
+                <span class="emoji-badge">😊<br><small style="font-size:1rem;">기쁨</small></span>
+                <span class="emoji-badge">😢<br><small style="font-size:1rem;">슬픔</small></span>
+                <span class="emoji-badge">😡<br><small style="font-size:1rem;">화남</small></span>
+            </div>
+            <br>
+            <button onclick="goStep(1)">시작하기 🚀</button>
+        </div>
+
+        <div id="step1" class="step">
+            <h2>✍️ 공감 문장 만들기</h2>
+            <p>친구들이 아래 감정을 느낄 때 해주고 싶은 다정한 말을 적거나 <b>마이크 버튼</b>을 눌러 말해보세요!</p>
+            
+            <div class="input-group joy">
+                <strong>😊 기쁨</strong> (예: 정말 축하해! 나도 함께 기뻐!)
+                <button class="stt-btn" onclick="startSTT('joyText')">🎤 음성 입력</button>
+                <textarea id="joyText" placeholder="여기에 기쁠 때 해줄 말을 적어주세요."></textarea>
+            </div>
+            <div class="input-group sad">
+                <strong>😢 슬픔</strong> (예: 괜찮아. 내가 옆에 있어줄게.)
+                <button class="stt-btn" onclick="startSTT('sadText')">🎤 음성 입력</button>
+                <textarea id="sadText" placeholder="여기에 슬플 때 해줄 말을 적어주세요."></textarea>
+            </div>
+            <div class="input-group angry">
+                <strong>😡 화남</strong> (예: 왜 화가 났는지 이야기해줄래?)
+                <button class="stt-btn" onclick="startSTT('angryText')">🎤 음성 입력</button>
+                <textarea id="angryText" placeholder="여기에 화가 났을 때 해줄 말을 적어주세요."></textarea>
+            </div>
+
+            <button class="secondary" onclick="goStep(0)">이전으로</button>
+            <button onclick="saveSentences(); goStep(2);">저장하고 다음으로 ➡️</button>
+        </div>
+
+        <div id="step2" class="step">
+            <h2>🔗 AI 모델 연결하기</h2>
+            <p>Teachable Machine에서 학습한 <b>이미지 모델 URL</b>을 입력해주세요.<br>
+            <small style="color:red;">* 필수 클래스명: <b>기쁨, 슬픔, 화남</b></small></p>
+            
+            <input type="text" id="modelUrlInput" class="model-input" placeholder="https://teachablemachine.withgoogle.com/models/xxxxx/">
+            <br>
+            <button onclick="loadModel()">[모델 불러오기]</button>
+            <br>
+            <div id="modelStatus" class="status-badge">⏳ 모델 연결을 기다리는 중입니다.</div>
+            <br><br>
+            <button class="secondary" onclick="goStep(1)">이전으로</button>
+            <button id="nextToStep3" onclick="goStep(3)" style="display:none; background-color:#51cf66;">감정 인식 시작하기 🎥</button>
+        </div>
+
+        <div id="step3" class="step">
+            <h2>🎥 실시간 감정 인식 친구</h2>
+            <p>카메라를 보며 기쁨, 슬픔, 화난 표정을 지어보세요!</p>
+
+            <div class="challenge-board">
+                <div id="sticker-joy" class="sticker">⚪ 기쁨 도전 중</div>
+                <div id="sticker-sad" class="sticker">⚪ 슬픔 도전 중</div>
+                <div id="sticker-angry" class="sticker">⚪ 화남 도전 중</div>
+            </div>
+
+            <div class="recognition-container">
+                <div class="cam-box">
+                    <video id="webcamVideo" autoplay playsinline muted></video>
+                </div>
+                <div class="result-box">
+                    <h3>📊 감정 분석 분석 결과</h3>
+                    <div id="prediction-list">
+                        </div>
+                </div>
+            </div>
+
+            <div class="output-display" id="outputDisplay">
+                <div id="feedbackEmoji" class="big-emoji">🤔</div>
+                <div id="feedbackText" style="font-size:1.2rem; font-weight:bold; margin-top:10px;">감정을 확인하는 중입니다.</div>
+                <div id="speechBubble" class="speech-bubble" style="display:none;"></div>
+            </div>
+            <br>
+            
+            <div style="margin-top: 20px;">
+                <button class="secondary" onclick="stopWebcam(); goStep(2);">이전으로</button>
+                <button id="goToCertBtn" class="cert-go-btn" onclick="stopWebcam(); goStep(4); playCelebration();" style="display:none;">👑 공감왕 인증서 받으러 가기</button>
+            </div>
+        </div>
+
+        <div id="step4" class="step">
+            <div class="certificate">
+                <div class="cert-title">🏆 공감왕 인증서</div>
+                <h2 style="color:#333;">축하합니다!</h2>
+                <p style="font-size:1.4rem; font-weight:bold; color:#555;">
+                    당신은 AI와 함께 친구의 감정을 이해하고<br>
+                    따뜻하게 공감해 주는 최고의 <span style="color:var(--primary); font-size:1.7rem;">[공감왕]</span>입니다.
+                </p>
+                <div style="font-size:5rem; margin:20px;">🎖️✨👑</div>
+            </div>
+            <br>
+            <button onclick="resetAllData()">처음부터 다시 하기 🔄</button>
+        </div>
+
+    </div>
+
+    <audio id="audioSuccess" src="https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav" preload="auto"></audio>
+    <audio id="audioCert" src="https://assets.mixkit.co/active_storage/sfx/2018/2018-84.wav" preload="auto"></audio>
+
+    <script>
+        // --- 글로벌 상태 변수들 ---
+        let currentStep = 0;
+        let model, maxPredictions;
+        let webCamStream = null;
+        let animationFrameId = null;
+
+        // 챌린지 성공 여부 체크용
+        let challengeStatus = { 기쁨: false, 슬픔: false, 화남: false };
+
+        // 기본 내장 데이터 및 로컬스토리지 보존용 공감 문장 구조
+        let sentences = {
+            joy: "정말 축하해! 나도 함께 기뻐!",
+            sad: "괜찮아. 내가 옆에 있어줄게.",
+            angry: "왜 화가 났는지 이야기해줄래?"
+        };
+
+        // --- 초기 시동 로직 ---
+        window.onload = function() {
+            loadSavedData();
+            initCameraList();
+        };
+
+        // 데이터 불러오기 및 세팅
+        function loadSavedData() {
+            if(localStorage.getItem("ai_empathy_sentences")) {
+                sentences = JSON.parse(localStorage.getItem("ai_empathy_sentences"));
+            }
+            document.getElementById("joyText").value = sentences.joy;
+            document.getElementById("sadText").value = sentences.sad;
+            document.getElementById("angryText").value = sentences.angry;
+
+            if(localStorage.getItem("ai_empathy_model_url")) {
+                document.getElementById("modelUrlInput").value = localStorage.getItem("ai_empathy_model_url");
+            }
+        }
+
+        // 공감 문장 로컬스토리지 자동저장
+        function saveSentences() {
+            sentences.joy = document.getElementById("joyText").value || "정말 축하해!";
+            sentences.sad = document.getElementById("sadText").value || "괜찮아.";
+            sentences.angry = document.getElementById("angryText").value || "화내지마~";
+            localStorage.setItem("ai_empathy_sentences", JSON.stringify(sentences));
+        }
+
+        // --- 스텝 이동 내비게이션 ---
+        function goStep(stepNum) {
+            document.getElementById(`step${currentStep}`).classList.remove("active");
+            document.getElementById(`step${stepNum}`).classList.add("active");
+            currentStep = stepNum;
+
+            if(stepNum === 3) {
+                // 스텝3 진입 시 버튼 상태 최신화 유지
+                checkChallengeButtonStatus();
+                startWebcam();
+            } else {
+                stopWebcam();
+            }
+        }
+
+        // --- 음성 인식 기능 (Web Speech API) ---
+        function startSTT(targetId) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 브라우저를 사용해주세요.");
+                return;
+            }
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'ko-KR';
+            recognition.interimResults = false;
+
+            const btn = event.target;
+            btn.innerText = "🎙️ 듣고 있어요...";
+            btn.style.backgroundColor = "#ff922b";
+
+            recognition.onresult = function(e) {
+                const resultText = e.results[0][0].transcript;
+                document.getElementById(targetId).value = resultText;
+                saveSentences(); // 입력 완료 직후 반영 및 저장
+            };
+
+            recognition.onerror = function() {
+                alert("음성 인식 오류가 발생했습니다. 다시 시도해보세요.");
+            };
+
+            recognition.onend = function() {
+                btn.innerText = "🎤 음성 입력";
+                btn.style.backgroundColor = "#51cf66";
+            };
+
+            recognition.start();
+        }
+
+        // --- Teachable Machine 모델 연결 핵심 기능 ---
+        async function loadModel() {
+            const modelURLInput = document.getElementById("modelUrlInput").value.trim();
+            if(!modelURLInput) { alert("모델 주소를 입력해주세요!"); return; }
+
+            const statusBadge = document.getElementById("modelStatus");
+            statusBadge.innerText = "⏳ 모델을 분석하고 로딩 중...";
+            statusBadge.className = "status-badge";
+
+            try {
+                const checkpointURL = modelURLInput + "model.json";
+                const metadataURL = modelURLInput + "metadata.json";
+
+                model = await tmImage.load(checkpointURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // 연결 성공 세팅
+                statusBadge.innerText = "✅ 모델 연결 완료";
+                statusBadge.classList.add("success");
+                localStorage.setItem("ai_empathy_model_url", modelURLInput);
+                document.getElementById("nextToStep3").style.display = "inline-block";
+            } catch(e) {
+                statusBadge.innerText = "❌ 연결 실패 (주소를 다시 확인해 주세요)";
+                alert("모델 로드에 실패했습니다. 올바른 Teachable Machine 공유 주소인지 확인해 주세요.");
+            }
+        }
+
+        // --- 멀티미디어 (카메라 탐색 및 연결 제어) ---
+        async function initCameraList() {
+            try {
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                const select = document.getElementById("cameraSelect");
+                select.innerHTML = "";
+                
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement("option");
+                    option.value = device.deviceId;
+                    option.text = device.label || `카메라 ${index + 1}`;
+                    select.appendChild(option);
+                });
+            } catch (err) {
+                console.error("카메라를 불러오지 못했습니다.", err);
+            }
+        }
+
+        async function startWebcam() {
+            const video = document.getElementById("webcamVideo");
+            const deviceId = document.getElementById("cameraSelect").value;
+            const constraints = {
+                video: deviceId ? { deviceId: { exact: deviceId } } : true
+            };
+
+            try {
+                webCamStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = webCamStream;
+                video.addEventListener('loadeddata', () => {
+                    loopRecognition();
+                });
+            } catch(err) {
+                alert("웹캠 시작 실패! 카메라 권한을 허용해 주세요.");
+            }
+        }
+
+        function stopWebcam() {
+            if(animationFrameId) cancelAnimationFrame(animationFrameId);
+            if(webCamStream) {
+                webCamStream.getTracks().forEach(track => track.stop());
+                webCamStream = null;
+            }
+        }
+
+        async function changeCamera() {
+            if(currentStep === 3) {
+                stopWebcam();
+                startWebcam();
+            }
+        }
+
+        // --- 실시간 감정 인식 AI 루프 가동 ---
+        async function loopRecognition() {
+            if(!webCamStream) return;
+            await predictEmotion();
+            animationFrameId = requestAnimationFrame(loopRecognition);
+        }
+
+        async function predictEmotion() {
+            const video = document.getElementById("webcamVideo");
+            const prediction = await model.predict(video);
+            
+            const listContainer = document.getElementById("prediction-list");
+            listContainer.innerHTML = "";
+
+            let maxClass = "";
+            let maxProbability = 0;
+
+            // 실시간 분석 상황 바 업데이트 구현
+            for (let i = 0; i < maxPredictions; i++) {
+                const className = prediction[i].className;
+                const probValue = prediction[i].probability;
+                const percentage = Math.round(probValue * 100);
+
+                if(probValue > maxProbability) {
+                    maxProbability = probValue;
+                    maxClass = className;
+                }
+
+                // UI 매핑용 이모지 확보
+                let emo = "❓";
+                if(className.includes("기쁨")) emo = "😊";
+                if(className.includes("슬픔")) emo = "😢";
+                if(className.includes("화남")) emo = "😡";
+
+                listContainer.innerHTML += `
+                    <div style="font-size:1.1rem; margin-top:5px;"><strong>${emo} ${className}</strong>: ${percentage}%</div>
+                    <div class="progress-bar"><div class="progress-fill" style="width: ${percentage}%"></div></div>
+                `;
+            }
+
+            // --- 판정 로직 처리 (70% 기준선) ---
+            const feedbackEmoji = document.getElementById("feedbackEmoji");
+            const feedbackText = document.getElementById("feedbackText");
+            const speechBubble = document.getElementById("speechBubble");
+
+            if (maxProbability >= 0.7) {
+                // 특정 감정 확정 상태
+                if(maxClass.includes("기쁨")) {
+                    feedbackEmoji.innerText = "😊";
+                    feedbackText.innerText = "기쁨이 느껴져요!";
+                    speechBubble.innerText = sentences.joy;
+                    triggerSticker("기쁨");
+                } else if(maxClass.includes("슬픔")) {
+                    feedbackEmoji.innerText = "😢";
+                    feedbackText.innerText = "슬픔이 느껴져요!";
+                    speechBubble.innerText = sentences.sad;
+                    triggerSticker("슬픔");
+                } else if(maxClass.includes("화남")) {
+                    feedbackEmoji.innerText = "😡";
+                    feedbackText.innerText = "화난 감정이 느껴져요!";
+                    speechBubble.innerText = sentences.angry;
+                    triggerSticker("화남");
+                }
+                
+                feedbackEmoji.classList.add("bounce");
+                speechBubble.style.display = "block";
+            } else {
+                // 감정 미확정 상태 기본 연출
+                feedbackEmoji.innerText = "🤔";
+                feedbackEmoji.classList.remove("bounce");
+                feedbackText.innerText = "감정을 확인하는 중입니다.\n카메라를 보고 조금 더 크게 표정을 지어주세요.";
+                speechBubble.style.display = "none";
+            }
+        }
+
+        // --- 챌린지 및 이펙트 연출 트리거 ---
+        function triggerSticker(emotionKey) {
+            if(!challengeStatus[emotionKey]) {
+                challengeStatus[emotionKey] = true;
+                
+                // 딩동 효과음 재생
+                document.getElementById("audioSuccess").play().catch(e=>{});
+
+                // 스티커 보드 활성화 UI 변경
+                const targetSticker = document.getElementById(`sticker-${emotionKey === '기쁨' ? 'joy' : emotionKey === '슬픔' ? 'sad' : 'angry'}`);
+                targetSticker.innerText = `🏆 ${emotionKey} 완료`;
+                targetSticker.classList.add("complete");
+
+                // 자동 이동 조건 제거 후 버튼 활성화 여부만 체크
+                checkChallengeButtonStatus();
+            }
+        }
+
+        // 3가지 조건 달성 시 화면 강제전환 대신 '인증서 가기' 버튼만 화면에 출현시킴
+        function checkChallengeButtonStatus() {
+            if(challengeStatus.기쁨 && challengeStatus.슬픔 && challengeStatus.화남) {
+                document.getElementById("goToCertBtn").style.display = "inline-block";
+            } else {
+                document.getElementById("goToCertBtn").style.display = "none";
+            }
+        }
+
+        // 최종 축하 연출 (폭죽 효과 및 사운드)
+        function playCelebration() {
+            document.getElementById("audioCert").play().catch(e=>{});
+            // Canvas-Confetti 이펙트 발생
+            confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+            
+            // 반짝임 유지용 딜레이 폭죽 연출 추가
+            setTimeout(() => { confetti({ particleCount: 100, spread: 60 }); }, 400);
+            setTimeout(() => { confetti({ particleCount: 100, spread: 100 }); }, 800);
+        }
+
+        // --- 유틸리티 제어 함수 모음 ---
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        function resetAllData() {
+            if(confirm("모든 데이터를 지우고 처음부터 다시 시작할까요?")) {
+                stopWebcam();
+                localStorage.clear();
+                challengeStatus = { 기쁨: false, 슬픔: false, 화남: false };
+                
+                // 스티커 초기화
+                ['joy', 'sad', 'angry'].forEach(id => {
+                    const s = document.getElementById(`sticker-${id}`);
+                    if(s) { s.classList.remove("complete"); }
+                });
+                document.getElementById("sticker-joy").innerText = "⚪ 기쁨 도전 중";
+                document.getElementById("sticker-sad").innerText = "⚪ 슬픔 도전 중";
+                document.getElementById("sticker-angry").innerText = "⚪ 화남 도전 중";
+
+                // 버튼 숨기기
+                document.getElementById("goToCertBtn").style.display = "none";
+
+                // 모델 리셋
+                document.getElementById("modelUrlInput").value = "";
+                document.getElementById("modelStatus").innerText = "⏳ 모델 연결을 기다리는 중입니다.";
+                document.getElementById("modelStatus").className = "status-badge";
+                document.getElementById("nextToStep3").style.display = "none";
+
+                loadSavedData();
+                goStep(0);
+            }
+        }
+    </script>
+</body>
+</html>
